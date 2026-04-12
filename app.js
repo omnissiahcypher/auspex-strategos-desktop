@@ -1,5 +1,5 @@
 /* =====================================================
-   Auspex Strategos — H3 Hexagonal 3D World Map
+   The Cartographer — H3 Hexagonal 3D World Map
 
    Rendering approach:
    - MapLibre native GeoJSON layers for all geo features:
@@ -23,7 +23,7 @@
 
     return {
       version: 8,
-      name: dark ? 'Auspex Strategos Dark' : 'Auspex Strategos Light',
+      name: dark ? 'The Cartographer Dark' : 'The Cartographer Light',
       glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
       sources: {
         osm: {
@@ -178,7 +178,8 @@
         { id: 'h3-grid', name: 'Hex Grid', color: '#00d4aa', active: true, type: 'h3' },
         { id: 'h3-elevation', name: 'Elevation Heatmap', color: '#ff6b35', active: false, type: 'h3data' },
         { id: 'h3-vegetation', name: 'Vegetation (NDVI)', color: '#2d8a4e', active: false, type: 'h3data' },
-        { id: 'h3-hydrology', name: 'Hydrology', color: '#1f6feb', active: false, type: 'h3data' }
+        { id: 'h3-hydrology', name: 'Hydrology', color: '#1f6feb', active: false, type: 'h3data' },
+        { id: 'h3-terrain', name: 'Terrain Classification', color: '#8b6d4b', active: false, type: 'h3data' }
       ]
     },
     {
@@ -582,15 +583,30 @@
     return computeHydrology(lat, lng);
   }
 
+  function computeTerrainType(lat, lng) {
+    const elev = computeElevation(lat, lng);
+    const ndvi = computeNDVI(lat, lng);
+    const hydro = computeHydrology(lat, lng);
+    const eNorm = elev / 8848;
+
+    if (hydro > 0.7 && eNorm < 0.05 && ndvi < 0.2) return { type: 'Water', code: 0 };
+    if (hydro > 0.6 && ndvi > 0.3 && eNorm < 0.1) return { type: 'Wetland', code: 1 };
+    if (eNorm > 0.6 || (Math.abs(lat) > 70 && ndvi < 0.1)) return { type: 'Snow/Ice', code: 2 };
+    if (eNorm > 0.35) return { type: 'Alpine', code: 3 };
+    if (eNorm > 0.2) return { type: 'Mountain', code: 4 };
+    if (ndvi > 0.7) return { type: 'Dense Forest', code: 5 };
+    if (ndvi > 0.5) return { type: 'Forest', code: 6 };
+    if (ndvi > 0.3 && Math.abs(lat) < 25) return { type: 'Savanna', code: 7 };
+    if (ndvi > 0.25) return { type: 'Grassland', code: 8 };
+    if (ndvi > 0.15) return { type: 'Shrubland', code: 9 };
+    if (ndvi < 0.1) return { type: 'Desert', code: 10 };
+    return { type: 'Arid', code: 11 };
+  }
+
+  // Keep backward compatible wrapper
   function getLandCover(hex) {
-    const v = getVegetation(hex);
-    const e = getElevation(hex);
-    const eNorm = e / 8848;
-    if (v > 0.6) return { type: 'Forest', value: v };
-    if (eNorm > 0.5) return { type: 'Mountain', value: eNorm };
-    if (v > 0.3) return { type: 'Grassland', value: v };
-    if (v < 0.1) return { type: 'Desert/Barren', value: 1 - v };
-    return { type: 'Mixed', value: 0.5 };
+    const [lat, lng] = h3.cellToLatLng(hex);
+    return computeTerrainType(lat, lng);
   }
 
   // ══════════════════════════════════════════════════════
@@ -630,13 +646,21 @@
     return [31, Math.floor(111 + h * 30), Math.floor(150 + h * 85), Math.floor(10 + h * 180)];
   }
   function landCoverColor(lc) {
-    switch (lc.type) {
-      case 'Forest': return [20, 120, 60, 150];
-      case 'Mountain': return [140, 110, 80, 150];
-      case 'Grassland': return [120, 160, 60, 140];
-      case 'Desert/Barren': return [200, 180, 130, 140];
-      default: return [100, 100, 80, 120];
-    }
+    const colors = {
+      'Water': [26, 82, 118, 170],
+      'Wetland': [46, 134, 193, 160],
+      'Snow/Ice': [236, 240, 241, 170],
+      'Alpine': [160, 82, 45, 160],
+      'Mountain': [139, 109, 75, 150],
+      'Dense Forest': [11, 83, 69, 170],
+      'Forest': [30, 132, 73, 160],
+      'Savanna': [212, 172, 13, 150],
+      'Grassland': [130, 224, 170, 140],
+      'Shrubland': [195, 155, 211, 140],
+      'Desert': [240, 217, 181, 140],
+      'Arid': [229, 152, 102, 140]
+    };
+    return colors[lc.type] || [136, 136, 136, 120];
   }
   function oceanColor(v) { return [0, 20 + v * 30, 60 + v * 130, 100 + v * 60]; }
 
@@ -1041,6 +1065,34 @@
       }));
     }
 
+    if (layerState['h3-terrain']) {
+      layers.push(new deck.H3HexagonLayer({
+        id: 'h3-terrain-layer',
+        data: hexes.map(hex => { const [lat, lng] = h3.cellToLatLng(hex); return { hex, terrain: computeTerrainType(lat, lng) }; }),
+        getHexagon: d => d.hex, filled: true, stroked: false, extruded: false,
+        getFillColor: d => {
+          const colors = {
+            0: [26, 82, 118, 170],    // Water
+            1: [46, 134, 193, 160],   // Wetland
+            2: [236, 240, 241, 170],  // Snow/Ice
+            3: [160, 82, 45, 160],    // Alpine
+            4: [139, 109, 75, 150],   // Mountain
+            5: [11, 83, 69, 170],     // Dense Forest
+            6: [30, 132, 73, 160],    // Forest
+            7: [212, 172, 13, 150],   // Savanna
+            8: [130, 224, 170, 140],  // Grassland
+            9: [195, 155, 211, 140],  // Shrubland
+            10: [240, 217, 181, 140], // Desert
+            11: [229, 152, 102, 140]  // Arid
+          };
+          return colors[d.terrain.code] || [136, 136, 136, 120];
+        },
+        pickable: true,
+        onHover: info => { if (info.object) showTooltip(info.x, info.y, `Terrain: ${info.object.terrain.type}`); else hideTooltip(); },
+        updateTriggers: { getFillColor: [hexes] }
+      }));
+    }
+
     if (layerState['land-cover']) {
       layers.push(new deck.H3HexagonLayer({
         id: 'land-cover-layer', data: hexes.map(hex => ({ hex, lc: getLandCover(hex) })),
@@ -1141,7 +1193,7 @@
           <div class="hex-detail-bar"><div class="hex-detail-bar-fill" style="width:${hydroPct.toFixed(1)}%; background: #1f6feb;"></div></div>
         </div>
         <div class="hex-detail">
-          <div class="hex-detail-label">Land Cover</div><div class="hex-detail-value">${lc.type}</div>
+          <div class="hex-detail-label">Terrain</div><div class="hex-detail-value">${lc.type}</div>
         </div>
       </div>`;
   }
