@@ -508,33 +508,86 @@
     return ((Math.sin(h * 9301 + 49297) * 233280) % 1 + 1) % 1;
   }
 
+  function computeElevation(lat, lng) {
+    let elev = 200;
+    // Himalayas
+    const dHim = Math.sqrt(Math.pow(lat - 28, 2) + Math.pow(lng - 85, 2));
+    if (dHim < 15) elev += (15 - dHim) / 15 * 6000;
+    // Andes
+    const dAnd = Math.abs(lng - (-70));
+    if (dAnd < 5 && lat > -55 && lat < 10) elev += (5 - dAnd) / 5 * 4000;
+    // Alps
+    const dAlp = Math.sqrt(Math.pow(lat - 46.5, 2) + Math.pow(lng - 10, 2));
+    if (dAlp < 5) elev += (5 - dAlp) / 5 * 3000;
+    // Rockies
+    const dRock = Math.abs(lng - (-110));
+    if (dRock < 8 && lat > 25 && lat < 60) elev += (8 - dRock) / 8 * 3000;
+    // Ethiopian Highlands
+    const dEth = Math.sqrt(Math.pow(lat - 9, 2) + Math.pow(lng - 39, 2));
+    if (dEth < 8) elev += (8 - dEth) / 8 * 2500;
+    // Tibetan Plateau
+    if (lat > 28 && lat < 38 && lng > 75 && lng < 100) elev += 3500;
+    return Math.max(0, Math.min(8848, elev + (Math.sin(lat * 0.1) * 200)));
+  }
+
+  function computeNDVI(lat, lng) {
+    const absLat = Math.abs(lat);
+    // Use deterministic hash instead of random
+    const hash = Math.abs(Math.sin(lat * 12.9898 + lng * 78.233) * 43758.5453) % 1;
+    // Sahara/Arabian desert
+    if (lng > -15 && lng < 60 && lat > 15 && lat < 30) return 0.05 + hash * 0.1;
+    // Australian interior
+    if (lat > -30 && lat < -20 && lng > 125 && lng < 145) return 0.05 + hash * 0.1;
+    // Tropical zone: high NDVI
+    if (absLat < 15) return 0.6 + hash * 0.3;
+    // Temperate: moderate
+    if (absLat < 45) return 0.25 + (1 - absLat / 45) * 0.4 + hash * 0.15;
+    // Boreal: lower
+    if (absLat < 65) return 0.15 + (1 - (absLat - 45) / 20) * 0.3 + hash * 0.1;
+    // Arctic/Antarctic
+    return 0.02 + hash * 0.05;
+  }
+
+  function computeHydrology(lat, lng) {
+    let hydro = 0.3;
+    const absLat = Math.abs(lat);
+    if (absLat < 10) hydro += 0.4;
+    if (absLat > 35 && absLat < 55) hydro += 0.2;
+    // Amazon basin
+    if (lat > -15 && lat < 5 && lng > -75 && lng < -45) hydro += 0.4;
+    // Congo basin
+    if (lat > -10 && lat < 5 && lng > 15 && lng < 30) hydro += 0.3;
+    // Ganges
+    if (lat > 22 && lat < 30 && lng > 75 && lng < 92) hydro += 0.3;
+    // Mississippi
+    if (lat > 29 && lat < 47 && lng > -95 && lng < -85) hydro += 0.2;
+    // Desert reduction
+    if (lng > -15 && lng < 60 && lat > 15 && lat < 35) hydro -= 0.3;
+    if (lat > -30 && lat < -20 && lng > 125 && lng < 145) hydro -= 0.2;
+    return Math.max(0, Math.min(1, hydro));
+  }
+
   function getElevation(hex) {
     const [lat, lng] = h3.cellToLatLng(hex);
-    const mf =
-      Math.max(0, 1 - Math.abs(lat - 28) / 15) * Math.max(0, 1 - Math.abs(lng - 87) / 30) +
-      Math.max(0, 1 - Math.abs(lat - 46) / 10) * Math.max(0, 1 - Math.abs(lng - 7) / 15) +
-      Math.max(0, 1 - Math.abs(lat - 38) / 15) * Math.max(0, 1 - Math.abs(lng + 106) / 20) +
-      Math.max(0, 1 - Math.abs(lat + 33) / 20) * Math.max(0, 1 - Math.abs(lng + 70) / 15);
-    return Math.min(1, pseudoRandom(hex, 42) * 0.3 + mf * 0.7);
+    return computeElevation(lat, lng);
   }
 
   function getVegetation(hex) {
-    const [lat] = h3.cellToLatLng(hex);
-    const tropical = Math.max(0, 1 - Math.abs(lat) / 30) * 0.7;
-    const temperate = Math.max(0, 1 - Math.abs(Math.abs(lat) - 50) / 20) * 0.5;
-    const desert = (Math.abs(lat) > 15 && Math.abs(lat) < 35) ? 0.3 : 0;
-    return Math.min(1, tropical + temperate - desert + pseudoRandom(hex, 7) * 0.2);
+    const [lat, lng] = h3.cellToLatLng(hex);
+    return computeNDVI(lat, lng);
   }
 
   function getHydrology(hex) {
-    const riverProx = pseudoRandom(hex, 123);
-    return Math.min(1, riverProx * 0.5 + pseudoRandom(hex, 99) * 0.2);
+    const [lat, lng] = h3.cellToLatLng(hex);
+    return computeHydrology(lat, lng);
   }
 
   function getLandCover(hex) {
-    const v = getVegetation(hex), e = getElevation(hex);
+    const v = getVegetation(hex);
+    const e = getElevation(hex);
+    const eNorm = e / 8848;
     if (v > 0.6) return { type: 'Forest', value: v };
-    if (e > 0.5) return { type: 'Mountain', value: e };
+    if (eNorm > 0.5) return { type: 'Mountain', value: eNorm };
     if (v > 0.3) return { type: 'Grassland', value: v };
     if (v < 0.1) return { type: 'Desert/Barren', value: 1 - v };
     return { type: 'Mixed', value: 0.5 };
@@ -563,15 +616,19 @@
     }
   }
 
-  function elevationColor(v) {
-    if (v < 0.2) return [20, 80, 160, 160];
-    if (v < 0.4) return [40, 160, 80, 160];
-    if (v < 0.6) return [200, 200, 40, 160];
-    if (v < 0.8) return [220, 100, 20, 160];
-    return [255, 255, 255, 180];
+  // Elevation color ramp (e = meters)
+  function elevationColor(e) {
+    const t = Math.min(e / 5000, 1);
+    return [255, Math.floor(107 - t * 67), Math.floor(53 - t * 53), Math.floor(20 + t * 180)];
   }
-  function vegetationColor(v) { return [30 + (1 - v) * 100, 80 + v * 175, 30 + (1 - v) * 40, 140]; }
-  function hydrologyColor(v) { return [10, 50 + v * 100, 150 + v * 105, 130 + v * 80]; }
+  // Vegetation color ramp (n = NDVI 0-1)
+  function vegetationColor(n) {
+    return [Math.floor(45 - n * 25), Math.floor(80 + n * 58), Math.floor(78 - n * 28), Math.floor(10 + n * 180)];
+  }
+  // Hydrology color ramp (h = 0-1)
+  function hydrologyColor(h) {
+    return [31, Math.floor(111 + h * 30), Math.floor(150 + h * 85), Math.floor(10 + h * 180)];
+  }
   function landCoverColor(lc) {
     switch (lc.type) {
       case 'Forest': return [20, 120, 60, 150];
@@ -941,29 +998,46 @@
 
     if (layerState['h3-elevation']) {
       layers.push(new deck.H3HexagonLayer({
-        id: 'h3-elevation-layer', data: hexes.map(hex => ({ hex, value: getElevation(hex) })),
-        getHexagon: d => d.hex, filled: true, stroked: false, extruded: true,
-        getFillColor: d => elevationColor(d.value), getElevation: d => d.value * 50000,
-        elevationScale: 1, pickable: true,
-        onClick: (info) => { if (info.object) selectHex(info.object.hex); }
+        id: 'h3-elevation-layer',
+        data: hexes.map(hex => { const [lat, lng] = h3.cellToLatLng(hex); return { hex, elevation: computeElevation(lat, lng) }; }),
+        getHexagon: d => d.hex, filled: true, stroked: false, extruded: false,
+        getFillColor: d => elevationColor(d.elevation),
+        pickable: true,
+        onClick: (info) => { if (info.object) selectHex(info.object.hex); },
+        onHover: (info) => {
+          if (info.object) showTooltipText(info.x, info.y, `H3: ${info.object.hex}\nElevation: ${info.object.elevation.toFixed(0)} m`);
+          else hideTooltip();
+        }
       }));
     }
 
     if (layerState['h3-vegetation']) {
       layers.push(new deck.H3HexagonLayer({
-        id: 'h3-vegetation-layer', data: hexes.map(hex => ({ hex, value: getVegetation(hex) })),
+        id: 'h3-vegetation-layer',
+        data: hexes.map(hex => { const [lat, lng] = h3.cellToLatLng(hex); return { hex, ndvi: computeNDVI(lat, lng) }; }),
         getHexagon: d => d.hex, filled: true, stroked: false, extruded: false,
-        getFillColor: d => vegetationColor(d.value), pickable: true,
-        onClick: (info) => { if (info.object) selectHex(info.object.hex); }
+        getFillColor: d => vegetationColor(d.ndvi),
+        pickable: true,
+        onClick: (info) => { if (info.object) selectHex(info.object.hex); },
+        onHover: (info) => {
+          if (info.object) showTooltipText(info.x, info.y, `H3: ${info.object.hex}\nNDVI: ${info.object.ndvi.toFixed(3)}`);
+          else hideTooltip();
+        }
       }));
     }
 
     if (layerState['h3-hydrology']) {
       layers.push(new deck.H3HexagonLayer({
-        id: 'h3-hydrology-layer', data: hexes.map(hex => ({ hex, value: getHydrology(hex) })),
+        id: 'h3-hydrology-layer',
+        data: hexes.map(hex => { const [lat, lng] = h3.cellToLatLng(hex); return { hex, hydrology: computeHydrology(lat, lng) }; }),
         getHexagon: d => d.hex, filled: true, stroked: false, extruded: false,
-        getFillColor: d => hydrologyColor(d.value), pickable: true,
-        onClick: (info) => { if (info.object) selectHex(info.object.hex); }
+        getFillColor: d => hydrologyColor(d.hydrology),
+        pickable: true,
+        onClick: (info) => { if (info.object) selectHex(info.object.hex); },
+        onHover: (info) => {
+          if (info.object) showTooltipText(info.x, info.y, `H3: ${info.object.hex}\nHydrology: ${info.object.hydrology.toFixed(3)}`);
+          else hideTooltip();
+        }
       }));
     }
 
@@ -1041,6 +1115,9 @@
     const parent = res > 0 ? h3.cellToParent(hexId, res - 1) : 'N/A';
     const childCount = res < 15 ? h3.cellToChildren(hexId, res + 1).length : 'N/A';
     const elev = getElevation(hexId), veg = getVegetation(hexId), hydro = getHydrology(hexId), lc = getLandCover(hexId);
+    const elevPct = Math.min(elev / 8848, 1) * 100;
+    const vegPct = veg * 100;
+    const hydroPct = hydro * 100;
 
     content.innerHTML = `
       <div class="hex-detail"><div class="hex-detail-label">H3 Index</div><div class="hex-detail-value">${hexId}</div></div>
@@ -1052,16 +1129,16 @@
       <div class="hex-detail"><div class="hex-detail-label">Children (res ${res + 1})</div><div class="hex-detail-value">${childCount}</div></div>
       <div style="border-top: 1px solid var(--border); margin: 12px 0; padding-top: 12px;">
         <div class="hex-detail">
-          <div class="hex-detail-label">Elevation Index</div><div class="hex-detail-value">${(elev * 100).toFixed(1)}%</div>
-          <div class="hex-detail-bar"><div class="hex-detail-bar-fill" style="width:${elev * 100}%; background: #ff6b35;"></div></div>
+          <div class="hex-detail-label">Elevation</div><div class="hex-detail-value">${elev.toFixed(0)} m</div>
+          <div class="hex-detail-bar"><div class="hex-detail-bar-fill" style="width:${elevPct.toFixed(1)}%; background: #ff6b35;"></div></div>
         </div>
         <div class="hex-detail">
-          <div class="hex-detail-label">Vegetation (NDVI)</div><div class="hex-detail-value">${(veg * 100).toFixed(1)}%</div>
-          <div class="hex-detail-bar"><div class="hex-detail-bar-fill" style="width:${veg * 100}%; background: #2d8a4e;"></div></div>
+          <div class="hex-detail-label">Vegetation (NDVI)</div><div class="hex-detail-value">${veg.toFixed(3)}</div>
+          <div class="hex-detail-bar"><div class="hex-detail-bar-fill" style="width:${vegPct.toFixed(1)}%; background: #2d8a4e;"></div></div>
         </div>
         <div class="hex-detail">
-          <div class="hex-detail-label">Hydrology</div><div class="hex-detail-value">${(hydro * 100).toFixed(1)}%</div>
-          <div class="hex-detail-bar"><div class="hex-detail-bar-fill" style="width:${hydro * 100}%; background: #1f6feb;"></div></div>
+          <div class="hex-detail-label">Hydrology</div><div class="hex-detail-value">${hydro.toFixed(3)}</div>
+          <div class="hex-detail-bar"><div class="hex-detail-bar-fill" style="width:${hydroPct.toFixed(1)}%; background: #1f6feb;"></div></div>
         </div>
         <div class="hex-detail">
           <div class="hex-detail-label">Land Cover</div><div class="hex-detail-value">${lc.type}</div>
