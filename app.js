@@ -1,6 +1,6 @@
 /* =====================================================
-   HexGlobe — H3 Hexagonal 3D World Map
-   
+   Auspex Strategos — H3 Hexagonal 3D World Map
+
    Rendering approach:
    - MapLibre native GeoJSON layers for all geo features:
      • Points (circle + symbol) for cities, airports, etc.
@@ -23,7 +23,7 @@
 
     return {
       version: 8,
-      name: dark ? 'HexGlobe Dark' : 'HexGlobe Light',
+      name: dark ? 'Auspex Strategos Dark' : 'Auspex Strategos Light',
       glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
       sources: {
         osm: {
@@ -216,8 +216,41 @@
         { id: 'land-cover', name: 'Land Cover', color: '#3fb950', active: false, type: 'h3data' },
         { id: 'ocean-depth', name: 'Ocean Bathymetry', color: '#0a3069', active: false, type: 'h3data' }
       ]
+    },
+    {
+      name: 'Cogitator Bellum',
+      layers: [
+        { id: 'cb-kinetic', name: 'Kinetic Munitions', color: '#f85149', active: false, type: 'cogitator' },
+        { id: 'cb-drones', name: 'Drones & UAVs', color: '#58a6ff', active: false, type: 'cogitator' },
+        { id: 'cb-ew', name: 'Electronic Warfare', color: '#d2a8ff', active: false, type: 'cogitator' },
+        { id: 'cb-defensive', name: 'Defensive Systems', color: '#3fb950', active: false, type: 'cogitator' }
+      ]
     }
   ];
+
+  // ── Cogitator Bellum Wiki Reference ──
+  const COGITATOR_BELLUM = {
+    'cb-kinetic': {
+      label: 'Kinetic Munitions',
+      color: '#f85149',
+      systems: ['JDAM', 'SDB', 'JSOW', 'Hellfire', 'Maverick', 'HIMARS/GMLRS', 'ATACMS', 'Excalibur', 'Tomahawk', 'Storm Shadow/SCALP', 'HARM/AARGM', 'Paveway II/III/IV', 'Brimstone', 'BONUS', 'SMArt-155', 'Taurus KEPD 350', 'AASM Hammer', 'Kh-101/102', 'Iskander-M', 'Kalibr', 'Kinzhal', 'Shahed-136/Geran-2', 'MAM-L', 'DF-21D', 'PL-15']
+    },
+    'cb-drones': {
+      label: 'Drones & UAVs',
+      color: '#58a6ff',
+      systems: ['MQ-1 Predator', 'MQ-9 Reaper', 'RQ-4 Global Hawk', 'RQ-170 Sentinel', 'Bayraktar TB2', 'Bayraktar Akinci', 'Shahed-129', 'Shahed-136/Geran-2', 'Wing Loong II', 'CH-5 Rainbow', 'Orion UCAV', 'Lancet-3', 'Switchblade 300', 'Switchblade 600', 'Phoenix Ghost', 'Heron TP', 'Harop', 'Harpy', 'Mohajer-6', 'Kargu-2', 'FPV Drones', 'UJ-22 Airborne']
+    },
+    'cb-ew': {
+      label: 'Electronic Warfare',
+      color: '#d2a8ff',
+      systems: ['Krasukha-4', 'Murmansk-BN', 'Borisoglebsk-2', 'Leer-3', 'Zhitel', 'Pole-21', 'AN/ALQ-99', 'AN/ALQ-249 NGJ', 'EA-18G Growler', 'EC-130H Compass Call', 'Iron Beam DEW', 'DroneShield', 'THOR', 'Coyote C-UAS', 'GPS/GNSS Jamming']
+    },
+    'cb-defensive': {
+      label: 'Defensive Systems',
+      color: '#3fb950',
+      systems: ['Patriot PAC-3', 'THAAD', 'Aegis BMD', 'NASAMS', 'Iron Dome', 'Davids Sling', 'Arrow-2/3', 'S-300', 'S-400', 'Pantsir-S1', 'Tor-M2', 'Buk-M3', 'IRIS-T SLM', 'Gepard', 'Starstreak', 'Stinger FIM-92', 'HQ-9', 'KM-SAM', 'Hawk XXI']
+    }
+  };
 
   // ── State ──
   let map, deckOverlay;
@@ -229,6 +262,12 @@
   let tooltip = null;
   let satAnimFrame = null;
   let mapSourcesAdded = false;
+
+  // Cogitator Bellum placement state
+  let placedMarkers = [];   // { id, category, system, color, lngLat }
+  let placementMode = null; // null | category id string
+  let cbMarkersAdded = false;
+  let cbMarkerIdCounter = 0;
 
   LAYER_GROUPS.forEach(g => g.layers.forEach(l => { layerState[l.id] = l.active; }));
 
@@ -670,6 +709,214 @@
   }
 
   // ══════════════════════════════════════════════════════
+  //  Cogitator Bellum — Marker Source & Layers
+  // ══════════════════════════════════════════════════════
+
+  function buildCBMarkersGeoJSON() {
+    return {
+      type: 'FeatureCollection',
+      features: placedMarkers.map(m => ({
+        type: 'Feature',
+        properties: { id: m.id, category: m.category, system: m.system, color: m.color },
+        geometry: { type: 'Point', coordinates: [m.lngLat.lng, m.lngLat.lat] }
+      }))
+    };
+  }
+
+  function addCBMarkersSourceAndLayers() {
+    if (cbMarkersAdded) return;
+    if (!map.isStyleLoaded()) return;
+
+    if (!map.getSource('cb-markers-src')) {
+      map.addSource('cb-markers-src', { type: 'geojson', data: buildCBMarkersGeoJSON() });
+    }
+
+    if (!map.getLayer('cb-markers-circle')) {
+      map.addLayer({
+        id: 'cb-markers-circle',
+        type: 'circle',
+        source: 'cb-markers-src',
+        paint: {
+          'circle-radius': 8,
+          'circle-color': ['get', 'color'],
+          'circle-opacity': 0.9,
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2
+        }
+      });
+    }
+
+    if (!map.getLayer('cb-markers-label')) {
+      map.addLayer({
+        id: 'cb-markers-label',
+        type: 'symbol',
+        source: 'cb-markers-src',
+        layout: {
+          'text-field': ['get', 'system'],
+          'text-size': 10,
+          'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
+          'text-offset': [0, 1.6],
+          'text-anchor': 'top',
+          'text-allow-overlap': false
+        },
+        paint: {
+          'text-color': ['get', 'color'],
+          'text-halo-color': isDark ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.85)',
+          'text-halo-width': 1.5
+        }
+      });
+    }
+
+    // Right-click to remove marker
+    map.on('contextmenu', 'cb-markers-circle', (e) => {
+      if (e.features && e.features.length > 0) {
+        const markerId = e.features[0].properties.id;
+        removeMarkerById(markerId);
+      }
+    });
+
+    // Hover cursor on markers
+    map.on('mouseenter', 'cb-markers-circle', () => {
+      if (!placementMode) map.getCanvas().style.cursor = 'pointer';
+    });
+    map.on('mouseleave', 'cb-markers-circle', () => {
+      if (!placementMode) map.getCanvas().style.cursor = '';
+    });
+
+    cbMarkersAdded = true;
+  }
+
+  function updateCBMarkersSource() {
+    const src = map.getSource('cb-markers-src');
+    if (src) {
+      src.setData(buildCBMarkersGeoJSON());
+    }
+  }
+
+  function removeMarkerById(id) {
+    const idx = placedMarkers.findIndex(m => m.id === id);
+    if (idx === -1) return;
+    placedMarkers.splice(idx, 1);
+    updateCBMarkersSource();
+  }
+
+  // ══════════════════════════════════════════════════════
+  //  Cogitator Bellum — Placement System
+  // ══════════════════════════════════════════════════════
+
+  function enterPlacementMode(categoryId) {
+    placementMode = categoryId;
+    map.getCanvas().style.cursor = 'crosshair';
+    const cbInfo = COGITATOR_BELLUM[categoryId];
+    const banner = document.getElementById('placement-banner');
+    banner.textContent = `Click map to place ${cbInfo.label} marker. Press Esc to cancel.`;
+    banner.style.display = 'block';
+
+    // Update button state
+    document.querySelectorAll('.cb-place-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.category === categoryId);
+    });
+  }
+
+  function exitPlacementMode() {
+    placementMode = null;
+    map.getCanvas().style.cursor = '';
+    const banner = document.getElementById('placement-banner');
+    banner.style.display = 'none';
+    document.querySelectorAll('.cb-place-btn').forEach(btn => btn.classList.remove('active'));
+  }
+
+  function handleMapClickForPlacement(e) {
+    if (!placementMode) return;
+
+    const categoryId = placementMode;
+    const cbInfo = COGITATOR_BELLUM[categoryId];
+    const lngLat = e.lngLat;
+
+    // Build the popup with a dropdown
+    const markerId = ++cbMarkerIdCounter;
+    const selectId = `cb-select-${markerId}`;
+    const confirmId = `cb-confirm-${markerId}`;
+
+    const options = cbInfo.systems.map(s => `<option value="${s}">${s}</option>`).join('');
+    const popupHTML = `
+      <strong style="color:${cbInfo.color}">${cbInfo.label}</strong>
+      <select id="${selectId}" class="cb-popup-select">
+        <option value="">— Select system —</option>
+        ${options}
+      </select>
+      <button id="${confirmId}" class="cb-popup-confirm">Place Marker</button>
+    `;
+
+    const markerPopup = new maplibregl.Popup({ closeOnClick: true, maxWidth: '220px' })
+      .setLngLat(lngLat)
+      .setHTML(popupHTML)
+      .addTo(map);
+
+    // Wire up the confirm button after the popup DOM is rendered
+    setTimeout(() => {
+      const confirmBtn = document.getElementById(confirmId);
+      const selectEl = document.getElementById(selectId);
+      if (!confirmBtn || !selectEl) return;
+
+      confirmBtn.addEventListener('click', () => {
+        const system = selectEl.value;
+        if (!system) return;
+        placedMarkers.push({ id: markerId, category: categoryId, system, color: cbInfo.color, lngLat });
+        updateCBMarkersSource();
+        markerPopup.remove();
+      });
+    }, 50);
+
+    // Stay in placement mode — user can keep placing
+  }
+
+  function setupPlacementKeyListener() {
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && placementMode) {
+        exitPlacementMode();
+      }
+    });
+    map.on('click', handleMapClickForPlacement);
+  }
+
+  // ══════════════════════════════════════════════════════
+  //  Topbar Place Buttons
+  // ══════════════════════════════════════════════════════
+
+  function updateCBPlaceButtons() {
+    const topbarRight = document.getElementById('topbar-right');
+
+    // Remove existing CB place buttons
+    topbarRight.querySelectorAll('.cb-place-btn').forEach(btn => btn.remove());
+
+    // Check which CB categories are active
+    const cbGroup = LAYER_GROUPS.find(g => g.name === 'Cogitator Bellum');
+    if (!cbGroup) return;
+
+    cbGroup.layers.forEach(layer => {
+      if (layerState[layer.id]) {
+        const cbInfo = COGITATOR_BELLUM[layer.id];
+        const btn = document.createElement('button');
+        btn.className = 'cb-place-btn';
+        btn.dataset.category = layer.id;
+        btn.title = `Place ${cbInfo.label} marker`;
+        btn.innerHTML = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${layer.color};margin-right:4px;flex-shrink:0;"></span> Place ${cbInfo.label}`;
+        btn.addEventListener('click', () => {
+          if (placementMode === layer.id) {
+            exitPlacementMode();
+          } else {
+            enterPlacementMode(layer.id);
+          }
+        });
+        // Insert before theme-toggle
+        const themeBtn = document.getElementById('theme-toggle');
+        topbarRight.insertBefore(btn, themeBtn);
+      }
+    });
+  }
+
+  // ══════════════════════════════════════════════════════
   //  deck.gl Layers (H3 + Satellites only)
   // ══════════════════════════════════════════════════════
 
@@ -871,6 +1118,15 @@
       setMapLayerVisibility(id, layerState[id]);
     }
 
+    // Cogitator Bellum layer toggled — update place buttons
+    if (COGITATOR_BELLUM[id]) {
+      // If turned off and currently placing this category, exit placement
+      if (!layerState[id] && placementMode === id) {
+        exitPlacementMode();
+      }
+      updateCBPlaceButtons();
+    }
+
     // deck.gl layers always rebuild
     updateDeckLayers();
   }
@@ -917,6 +1173,7 @@
 
     // Rebuild style (GeoJSON sources + layers are embedded in the style spec)
     mapSourcesAdded = false;
+    cbMarkersAdded = false;
     map.setStyle(buildStyle(isDark));
     map.once('style.load', () => {
       // Re-add terrain/hillshade (not in style spec to avoid worker race)
@@ -928,6 +1185,10 @@
                  'hillshade-accent-color': '#00d4aa', 'hillshade-exaggeration': 0.3 }
       }, 'roads-line');
       if (layerState['terrain-3d']) map.setTerrain({ source: 'terrain', exaggeration: 1.5 });
+
+      // Re-add CB markers source and layers
+      addCBMarkersSourceAndLayers();
+
       updateDeckLayers();
       addMapInteractions();
     });
@@ -1337,6 +1598,12 @@
       updateDeckLayers();
       updateStatus();
       addMapInteractions();
+
+      // Add CB markers source and layers (programmatically, not in buildStyle)
+      addCBMarkersSourceAndLayers();
+
+      // Setup placement keyboard listener and map click handler
+      setupPlacementKeyListener();
 
       // Add terrain/hillshade AFTER a short delay — raster-DEM source errors
       // during the load cycle cascade to the GeoJSON worker pool.

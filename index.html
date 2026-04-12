@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HexGlobe Desktop — H3 Hexagonal World Map</title>
+  <title>Auspex Strategos — H3 Hexagonal World Map</title>
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.1.0/dist/maplibre-gl.css" />
   <link rel="stylesheet" href="style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -15,12 +15,8 @@
   <!-- Top bar -->
   <header id="topbar">
     <div class="topbar-left">
-      <svg class="logo" width="28" height="28" viewBox="0 0 32 32" fill="none" aria-label="HexGlobe">
-        <path d="M16 2L28 9V23L16 30L4 23V9L16 2Z" stroke="currentColor" stroke-width="2" fill="none"/>
-        <path d="M16 10L22 13.5V20.5L16 24L10 20.5V13.5L16 10Z" fill="currentColor" opacity="0.3"/>
-        <circle cx="16" cy="16" r="3" fill="currentColor"/>
-      </svg>
-      <span class="app-title">HexGlobe</span>
+      <img src="logo.jpeg" class="logo-img" height="28" width="28" style="border-radius:50%;object-fit:cover;" alt="Auspex Strategos" />
+      <span class="app-title">Auspex Strategos</span>
     </div>
     <div class="topbar-center">
       <div class="res-control">
@@ -29,7 +25,7 @@
         <span id="h3res-val" class="mono">3</span>
       </div>
     </div>
-    <div class="topbar-right">
+    <div class="topbar-right" id="topbar-right">
       <button id="theme-toggle" data-theme-toggle aria-label="Toggle dark mode">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
@@ -119,14 +115,14 @@
     </div>
   </aside>
 
+  <!-- Placement mode banner -->
+  <div id="placement-banner" style="display:none;"></div>
+
   <!-- Loading overlay -->
   <div id="loading-overlay">
     <div class="loader">
-      <svg width="48" height="48" viewBox="0 0 32 32" fill="none" class="spin">
-        <path d="M16 2L28 9V23L16 30L4 23V9L16 2Z" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.3"/>
-        <path d="M16 10L22 13.5V20.5L16 24L10 20.5V13.5L16 10Z" fill="currentColor" opacity="0.6"/>
-      </svg>
-      <p>Loading HexGlobe...</p>
+      <img src="logo.jpeg" width="48" height="48" class="spin" style="border-radius:50%;object-fit:cover;" alt="Auspex Strategos" />
+      <p>Loading Auspex Strategos...</p>
     </div>
   </div>
 

@@ -1,5 +1,5 @@
 /* =====================================================
-   HexGlobe — Dark-first geospatial UI
+   Auspex Strategos — Dark-first geospatial UI
    ===================================================== */
 
 :root {
@@ -141,6 +141,56 @@ html, body {
 #topbar button:hover, .fab:hover {
   background: var(--accent-dim);
   color: var(--accent);
+}
+
+/* ---- CB Place Button ---- */
+.cb-place-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  height: 32px;
+  border-radius: var(--radius);
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  font-family: var(--font-body);
+  width: auto;
+}
+
+.cb-place-btn:hover {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.cb-place-btn.active {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+
+/* ---- Placement Banner ---- */
+#placement-banner {
+  position: fixed;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 8px 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--accent);
+  z-index: 200;
+  box-shadow: var(--shadow);
+  pointer-events: none;
 }
 
 /* ---- Panels ---- */
@@ -640,6 +690,44 @@ html, body {
 
 .maplibregl-popup-anchor-top .maplibregl-popup-tip {
   border-bottom-color: var(--surface) !important;
+}
+
+/* ---- CB Marker Popup ---- */
+.cb-popup-select {
+  width: 100%;
+  margin-top: 8px;
+  padding: 5px 8px;
+  font-size: 0.8rem;
+  font-family: var(--font-body);
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+  outline: none;
+}
+
+.cb-popup-select:focus {
+  border-color: var(--accent);
+}
+
+.cb-popup-confirm {
+  margin-top: 8px;
+  padding: 5px 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: var(--font-body);
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  width: 100%;
+  transition: background 0.15s ease;
+}
+
+.cb-popup-confirm:hover {
+  background: var(--accent-hover);
 }
 
 /* ---- Scrollbar ---- */
