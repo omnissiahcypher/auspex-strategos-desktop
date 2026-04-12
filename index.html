@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HexGlobe Desktop — H3 Hexagonal World Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.1.0/dist/maplibre-gl.css" />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="map"></div>
+
+  <!-- Top bar -->
+  <header id="topbar">
+    <div class="topbar-left">
+      <svg class="logo" width="28" height="28" viewBox="0 0 32 32" fill="none" aria-label="HexGlobe">
+        <path d="M16 2L28 9V23L16 30L4 23V9L16 2Z" stroke="currentColor" stroke-width="2" fill="none"/>
+        <path d="M16 10L22 13.5V20.5L16 24L10 20.5V13.5L16 10Z" fill="currentColor" opacity="0.3"/>
+        <circle cx="16" cy="16" r="3" fill="currentColor"/>
+      </svg>
+      <span class="app-title">HexGlobe</span>
+    </div>
+    <div class="topbar-center">
+      <div class="res-control">
+        <label for="h3res">H3 Resolution</label>
+        <input type="range" id="h3res" min="0" max="9" value="3" step="1" />
+        <span id="h3res-val" class="mono">3</span>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <button id="theme-toggle" data-theme-toggle aria-label="Toggle dark mode">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+      <button id="hex-info-btn" aria-label="Hex Info">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Layer panel -->
+  <aside id="layer-panel" class="panel">
+    <div class="panel-header">
+      <h2>Layers</h2>
+      <button id="panel-close" aria-label="Close panel">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="panel-body" id="layer-list"></div>
+  </aside>
+
+  <!-- Layer toggle button -->
+  <button id="layer-toggle-btn" class="fab" aria-label="Toggle layers">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+    </svg>
+  </button>
+
+  <!-- File upload button -->
+  <button id="file-upload-btn" class="fab fab-upload" aria-label="Upload GeoJSON/KML/KMZ">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/>
+      <line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+  </button>
+
+  <!-- File upload panel -->
+  <aside id="upload-panel" class="panel panel-right" style="display:none;">
+    <div class="panel-header">
+      <h2>File Upload</h2>
+      <button id="upload-panel-close" aria-label="Close upload panel">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="panel-body">
+      <div id="drop-zone" class="drop-zone" role="button" tabindex="0" aria-label="Drop files here or click to browse">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="drop-icon">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <p class="drop-text">Drag & drop files here</p>
+        <p class="drop-hint">GeoJSON, KML, or KMZ</p>
+        <button id="file-browse-btn" class="browse-btn">Browse Files</button>
+        <input type="file" id="file-input" accept=".geojson,.json,.kml,.kmz" multiple hidden />
+      </div>
+      <div id="uploaded-files-list" class="uploaded-files"></div>
+    </div>
+  </aside>
+
+  <!-- Full-screen drop overlay -->
+  <div id="global-drop-overlay" class="global-drop-overlay" hidden>
+    <div class="global-drop-content">
+      <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/>
+        <line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <p>Drop GeoJSON, KML, or KMZ files</p>
+    </div>
+  </div>
+
+  <!-- Hex info panel -->
+  <aside id="hex-info-panel" class="panel panel-right" style="display:none;">
+    <div class="panel-header">
+      <h2>Hex Info</h2>
+      <button id="hex-info-close" aria-label="Close hex info">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="panel-body" id="hex-info-content">
+      <p class="hint">Click on any hex to see details</p>
+    </div>
+  </aside>
+
+  <!-- Loading overlay -->
+  <div id="loading-overlay">
+    <div class="loader">
+      <svg width="48" height="48" viewBox="0 0 32 32" fill="none" class="spin">
+        <path d="M16 2L28 9V23L16 30L4 23V9L16 2Z" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.3"/>
+        <path d="M16 10L22 13.5V20.5L16 24L10 20.5V13.5L16 10Z" fill="currentColor" opacity="0.6"/>
+      </svg>
+      <p>Loading HexGlobe...</p>
+    </div>
+  </div>
+
+  <!-- Status bar -->
+  <footer id="statusbar">
+    <span id="status-coords" class="mono"></span>
+    <span id="status-hex" class="mono"></span>
+    <span id="status-zoom" class="mono"></span>
+  </footer>
+
+  <script src="https://unpkg.com/maplibre-gl@5.1.0/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/h3-js@4.2.1/dist/h3-js.umd.js"></script>
+  <script src="https://unpkg.com/deck.gl@9.1.7/dist.min.js"></script>
+  <script src="https://unpkg.com/@deck.gl/mapbox@9.1.7/dist.min.js"></script>
+  <script src="https://unpkg.com/satellite.js@5.0.0/dist/satellite.min.js"></script>
+  <script src="https://unpkg.com/@tmcw/togeojson@6.0.0/dist/togeojson.umd.js"></script>
+  <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
