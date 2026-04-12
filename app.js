@@ -602,9 +602,9 @@
     const center = map.getCenter();
     const maxHexes = 4000;
     const ne = bounds.getNorthEast(), sw = bounds.getSouthWest();
-    const poly = [[sw.lat, sw.lng], [sw.lat, ne.lng], [ne.lat, ne.lng], [ne.lat, sw.lng], [sw.lat, sw.lng]];
+    const poly = [[[sw.lat, sw.lng], [sw.lat, ne.lng], [ne.lat, ne.lng], [ne.lat, sw.lng], [sw.lat, sw.lng]]];
     try {
-      let hexes = h3.polygonToCells(poly, res, true);
+      let hexes = h3.polygonToCells(poly, res, false);
       if (hexes.length > maxHexes) {
         const step = Math.ceil(hexes.length / maxHexes);
         hexes = hexes.filter((_, i) => i % step === 0);
