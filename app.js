@@ -176,10 +176,11 @@
       name: 'H3 Grid',
       layers: [
         { id: 'h3-grid', name: 'Hex Grid', color: '#00d4aa', active: true, type: 'h3' },
-        { id: 'h3-elevation', name: 'Elevation Heatmap', color: '#ff6b35', active: false, type: 'h3data' },
-        { id: 'h3-vegetation', name: 'Vegetation (NDVI)', color: '#2d8a4e', active: false, type: 'h3data' },
-        { id: 'h3-hydrology', name: 'Hydrology', color: '#1f6feb', active: false, type: 'h3data' },
-        { id: 'h3-terrain', name: 'Terrain Classification', color: '#8b6d4b', active: false, type: 'h3data' }
+        { id: 'h3-elevation', name: 'Elevation Heatmap', color: '#8B4513', active: false, type: 'h3data' },
+        { id: 'h3-vegetation', name: 'Vegetation (NDVI)', color: '#228B22', active: false, type: 'h3data' },
+        { id: 'h3-hydrology', name: 'Hydrology', color: '#000080', active: false, type: 'h3data' },
+        { id: 'h3-terrain', name: 'Terrain Classification', color: '#4B3621', active: false, type: 'h3data' },
+        { id: 'h3-soil', name: 'Soil Composition', color: '#4B3621', active: false, type: 'h3data' }
       ]
     },
     {
@@ -509,6 +510,82 @@
     return ((Math.sin(h * 9301 + 49297) * 233280) % 1 + 1) % 1;
   }
 
+  // ── Real Elevation from AWS Terrain Tiles (Terrarium format) ──
+  const elevationCache = new Map();
+  const elevationPending = new Map();
+  const TERRAIN_TILE_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium';
+
+  function latLngToTile(lat, lng, zoom) {
+    const n = Math.pow(2, zoom);
+    const x = Math.floor((lng + 180) / 360 * n);
+    const latRad = lat * Math.PI / 180;
+    const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
+    return { x: Math.max(0, Math.min(n - 1, x)), y: Math.max(0, Math.min(n - 1, y)), z: zoom };
+  }
+
+  function decodeTerrarium(r, g, b) {
+    return (r * 256 + g + b / 256) - 32768;
+  }
+
+  async function fetchElevationForCoords(lat, lng) {
+    const zoom = 10;
+    const tile = latLngToTile(lat, lng, zoom);
+    const key = `${tile.z}/${tile.x}/${tile.y}`;
+
+    if (elevationCache.has(key)) {
+      return sampleElevationFromTile(elevationCache.get(key), lat, lng, tile, zoom);
+    }
+
+    if (elevationPending.has(key)) {
+      await elevationPending.get(key);
+      if (elevationCache.has(key)) {
+        return sampleElevationFromTile(elevationCache.get(key), lat, lng, tile, zoom);
+      }
+      return computeElevation(lat, lng);
+    }
+
+    const promise = new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        const imageData = ctx.getImageData(0, 0, 256, 256);
+        elevationCache.set(key, imageData);
+        resolve();
+      };
+      img.onerror = () => {
+        elevationCache.set(key, null);
+        resolve();
+      };
+      img.src = `${TERRAIN_TILE_URL}/${key}.png`;
+    });
+
+    elevationPending.set(key, promise);
+    await promise;
+    elevationPending.delete(key);
+
+    if (elevationCache.has(key) && elevationCache.get(key)) {
+      return sampleElevationFromTile(elevationCache.get(key), lat, lng, tile, zoom);
+    }
+    return computeElevation(lat, lng);
+  }
+
+  function sampleElevationFromTile(imageData, lat, lng, tile, zoom) {
+    if (!imageData) return computeElevation(lat, lng);
+    const n = Math.pow(2, zoom);
+    const xFrac = ((lng + 180) / 360 * n) - tile.x;
+    const yFrac = ((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * n) - tile.y;
+    const px = Math.max(0, Math.min(255, Math.floor(xFrac * 256)));
+    const py = Math.max(0, Math.min(255, Math.floor(yFrac * 256)));
+    const idx = (py * 256 + px) * 4;
+    const r = imageData.data[idx], g = imageData.data[idx + 1], b = imageData.data[idx + 2];
+    return Math.max(0, decodeTerrarium(r, g, b));
+  }
+
   function computeElevation(lat, lng) {
     let elev = 200;
     // Himalayas
@@ -568,9 +645,23 @@
     return Math.max(0, Math.min(1, hydro));
   }
 
+  function getRealElevation(lat, lng) {
+    const zoom = 10;
+    const tile = latLngToTile(lat, lng, zoom);
+    const key = `${tile.z}/${tile.x}/${tile.y}`;
+    if (elevationCache.has(key) && elevationCache.get(key)) {
+      return sampleElevationFromTile(elevationCache.get(key), lat, lng, tile, zoom);
+    }
+    // Trigger async fetch for next render
+    fetchElevationForCoords(lat, lng).then(() => {
+      if (deckOverlay) deckOverlay.setProps({ layers: buildDeckLayers() });
+    });
+    return computeElevation(lat, lng); // sync fallback
+  }
+
   function getElevation(hex) {
     const [lat, lng] = h3.cellToLatLng(hex);
-    return computeElevation(lat, lng);
+    return getRealElevation(lat, lng);
   }
 
   function getVegetation(hex) {
@@ -601,6 +692,29 @@
     if (ndvi > 0.15) return { type: 'Shrubland', code: 9 };
     if (ndvi < 0.1) return { type: 'Desert', code: 10 };
     return { type: 'Arid', code: 11 };
+  }
+
+  function computeSoilType(lat, lng) {
+    const elev = computeElevation(lat, lng);
+    const ndvi = computeNDVI(lat, lng);
+    const hydro = computeHydrology(lat, lng);
+    const eNorm = elev / 8848;
+    const absLat = Math.abs(lat);
+
+    if (absLat > 60 && ndvi < 0.15) return { type: 'Gelisol (Permafrost)', code: 0 };
+    if (hydro > 0.6 && ndvi > 0.4 && eNorm < 0.1) return { type: 'Histosol (Organic/Peat)', code: 1 };
+    if (ndvi < 0.1 && hydro < 0.3) return { type: 'Aridisol (Desert Sand)', code: 2 };
+    const volcanic = (lat > -5 && lat < 5 && lng > 100 && lng < 130) ||
+                     (lat > 30 && lat < 45 && lng > 135 && lng < 145) ||
+                     (lat > -45 && lat < -33 && lng > 165 && lng < 180) ||
+                     (lat > 60 && lat < 66 && lng > -25 && lng < -13);
+    if (volcanic && eNorm > 0.1) return { type: 'Andisol (Volcanic)', code: 3 };
+    if (eNorm > 0.3) return { type: 'Entisol (Rocky/Thin)', code: 4 };
+    if (absLat < 20 && ndvi > 0.5 && hydro > 0.4) return { type: 'Oxisol (Tropical Clay)', code: 5 };
+    if (hydro > 0.5 && eNorm < 0.1) return { type: 'Fluvisol (Alluvial)', code: 6 };
+    if (absLat > 25 && absLat < 55 && ndvi > 0.3) return { type: 'Mollisol (Rich Loam)', code: 7 };
+    if (ndvi > 0.15 && ndvi < 0.35) return { type: 'Alfisol (Grassland)', code: 8 };
+    return { type: 'Inceptisol (Mixed)', code: 9 };
   }
 
   // Keep backward compatible wrapper
@@ -647,18 +761,18 @@
   }
   function landCoverColor(lc) {
     const colors = {
-      'Water': [26, 82, 118, 170],
-      'Wetland': [46, 134, 193, 160],
-      'Snow/Ice': [236, 240, 241, 170],
-      'Alpine': [160, 82, 45, 160],
-      'Mountain': [139, 109, 75, 150],
-      'Dense Forest': [11, 83, 69, 170],
-      'Forest': [30, 132, 73, 160],
-      'Savanna': [212, 172, 13, 150],
-      'Grassland': [130, 224, 170, 140],
-      'Shrubland': [195, 155, 211, 140],
-      'Desert': [240, 217, 181, 140],
-      'Arid': [229, 152, 102, 140]
+      'Water': [0, 0, 128, 180],
+      'Wetland': [65, 105, 225, 170],
+      'Snow/Ice': [255, 255, 255, 180],
+      'Alpine': [139, 69, 19, 170],
+      'Mountain': [160, 82, 45, 160],
+      'Dense Forest': [0, 100, 0, 180],
+      'Forest': [34, 139, 34, 170],
+      'Savanna': [189, 183, 107, 160],
+      'Grassland': [144, 238, 144, 150],
+      'Shrubland': [192, 192, 192, 140],
+      'Desert': [245, 222, 179, 150],
+      'Arid': [222, 184, 135, 150]
     };
     return colors[lc.type] || [136, 136, 136, 120];
   }
@@ -1023,9 +1137,17 @@
     if (layerState['h3-elevation']) {
       layers.push(new deck.H3HexagonLayer({
         id: 'h3-elevation-layer',
-        data: hexes.map(hex => { const [lat, lng] = h3.cellToLatLng(hex); return { hex, elevation: computeElevation(lat, lng) }; }),
+        data: hexes.map(hex => { const [lat, lng] = h3.cellToLatLng(hex); return { hex, elevation: getRealElevation(lat, lng) }; }),
         getHexagon: d => d.hex, filled: true, stroked: false, extruded: false,
-        getFillColor: d => elevationColor(d.elevation),
+        getFillColor: d => {
+          const t = d.elevation / 8848;
+          if (t > 0.8) return [255, 255, 255, 220]; // snow white
+          if (t > 0.6) return [90, 60, 30, 195];    // dark brown
+          if (t > 0.4) return [120, 80, 40, 170];   // brown
+          if (t > 0.25) return [150, 110, 70, 145];  // medium brown
+          if (t > 0.1) return [180, 140, 100, 120];  // light brown
+          return [210, 180, 140, 80];                 // tan
+        },
         pickable: true,
         onClick: (info) => { if (info.object) selectHex(info.object.hex); },
         onHover: (info) => {
@@ -1040,7 +1162,15 @@
         id: 'h3-vegetation-layer',
         data: hexes.map(hex => { const [lat, lng] = h3.cellToLatLng(hex); return { hex, ndvi: computeNDVI(lat, lng) }; }),
         getHexagon: d => d.hex, filled: true, stroked: false, extruded: false,
-        getFillColor: d => vegetationColor(d.ndvi),
+        getFillColor: d => {
+          const v = d.ndvi;
+          if (v > 0.8) return [0, 80, 0, 200];       // very dark green
+          if (v > 0.6) return [20, 100, 20, 180];     // deep green
+          if (v > 0.4) return [50, 120, 30, 160];     // dark green
+          if (v > 0.2) return [85, 140, 50, 130];     // forest green
+          if (v > 0.1) return [150, 180, 80, 100];    // olive
+          return [245, 245, 220, 60];                  // beige (barren)
+        },
         pickable: true,
         onClick: (info) => { if (info.object) selectHex(info.object.hex); },
         onHover: (info) => {
@@ -1055,7 +1185,15 @@
         id: 'h3-hydrology-layer',
         data: hexes.map(hex => { const [lat, lng] = h3.cellToLatLng(hex); return { hex, hydrology: computeHydrology(lat, lng) }; }),
         getHexagon: d => d.hex, filled: true, stroked: false, extruded: false,
-        getFillColor: d => hydrologyColor(d.hydrology),
+        getFillColor: d => {
+          const h = d.hydrology;
+          if (h > 0.85) return [0, 20, 120, 200];     // navy
+          if (h > 0.7) return [0, 50, 160, 180];      // dark blue
+          if (h > 0.5) return [30, 80, 200, 160];     // medium blue
+          if (h > 0.3) return [65, 105, 225, 130];    // royal blue
+          if (h > 0.15) return [100, 149, 237, 100];  // cornflower
+          return [220, 220, 230, 40];                  // near invisible
+        },
         pickable: true,
         onClick: (info) => { if (info.object) selectHex(info.object.hex); },
         onHover: (info) => {
@@ -1072,23 +1210,50 @@
         getHexagon: d => d.hex, filled: true, stroked: false, extruded: false,
         getFillColor: d => {
           const colors = {
-            0: [26, 82, 118, 170],    // Water
-            1: [46, 134, 193, 160],   // Wetland
-            2: [236, 240, 241, 170],  // Snow/Ice
-            3: [160, 82, 45, 160],    // Alpine
-            4: [139, 109, 75, 150],   // Mountain
-            5: [11, 83, 69, 170],     // Dense Forest
-            6: [30, 132, 73, 160],    // Forest
-            7: [212, 172, 13, 150],   // Savanna
-            8: [130, 224, 170, 140],  // Grassland
-            9: [195, 155, 211, 140],  // Shrubland
-            10: [240, 217, 181, 140], // Desert
-            11: [229, 152, 102, 140]  // Arid
+            0: [0, 0, 128, 180],       // Water - navy
+            1: [65, 105, 225, 170],    // Wetland - royal blue
+            2: [255, 255, 255, 180],   // Snow/Ice - white
+            3: [139, 69, 19, 170],     // Alpine - saddle brown
+            4: [160, 82, 45, 160],     // Mountain - sienna
+            5: [0, 100, 0, 180],       // Dense Forest - dark green
+            6: [34, 139, 34, 170],     // Forest - forest green
+            7: [189, 183, 107, 160],   // Savanna - dark khaki
+            8: [144, 238, 144, 150],   // Grassland - light green
+            9: [192, 192, 192, 140],   // Shrubland - silver
+            10: [245, 222, 179, 150],  // Desert - wheat
+            11: [222, 184, 135, 150]   // Arid - burlywood
           };
           return colors[d.terrain.code] || [136, 136, 136, 120];
         },
         pickable: true,
         onHover: info => { if (info.object) showTooltip(info.x, info.y, `Terrain: ${info.object.terrain.type}`); else hideTooltip(); },
+        updateTriggers: { getFillColor: [hexes] }
+      }));
+    }
+
+    if (layerState['h3-soil']) {
+      layers.push(new deck.H3HexagonLayer({
+        id: 'h3-soil-layer',
+        data: hexes.map(hex => { const [lat, lng] = h3.cellToLatLng(hex); return { hex, soil: computeSoilType(lat, lng) }; }),
+        getHexagon: d => d.hex, filled: true, stroked: false, extruded: false,
+        getFillColor: d => {
+          const colors = {
+            0: [176, 196, 222, 160],  // Gelisol - light steel blue
+            1: [47, 79, 79, 170],     // Histosol - dark slate
+            2: [244, 164, 96, 160],   // Aridisol - sandy brown
+            3: [105, 105, 105, 160],  // Andisol - dim grey
+            4: [128, 128, 128, 150],  // Entisol - grey
+            5: [205, 133, 63, 160],   // Oxisol - peru
+            6: [222, 184, 135, 150],  // Fluvisol - burlywood
+            7: [139, 69, 19, 170],    // Mollisol - saddle brown
+            8: [210, 180, 140, 150],  // Alfisol - tan
+            9: [188, 143, 143, 140]   // Inceptisol - rosy brown
+          };
+          return colors[d.soil.code] || [136, 136, 136, 120];
+        },
+        pickable: true,
+        onHover: info => { if (info.object) showTooltip(info.x, info.y, `Soil: ${info.object.soil.type}`); else hideTooltip(); },
+        onClick: info => { if (info.object) selectHex(info.object.hex); },
         updateTriggers: { getFillColor: [hexes] }
       }));
     }
@@ -1167,6 +1332,7 @@
     const parent = res > 0 ? h3.cellToParent(hexId, res - 1) : 'N/A';
     const childCount = res < 15 ? h3.cellToChildren(hexId, res + 1).length : 'N/A';
     const elev = getElevation(hexId), veg = getVegetation(hexId), hydro = getHydrology(hexId), lc = getLandCover(hexId);
+    const soil = computeSoilType(lat, lng);
     const elevPct = Math.min(elev / 8848, 1) * 100;
     const vegPct = veg * 100;
     const hydroPct = hydro * 100;
@@ -1195,6 +1361,7 @@
         <div class="hex-detail">
           <div class="hex-detail-label">Terrain</div><div class="hex-detail-value">${lc.type}</div>
         </div>
+        <div class="hex-detail"><div class="hex-detail-label">Soil</div><div class="hex-detail-value">${soil.type}</div></div>
       </div>`;
   }
 
